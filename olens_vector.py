@@ -9,6 +9,8 @@ from mechtools.colors import *
 t.set_grad_enabled(False)
 set_seed(42)
 
+#%%
+
 VECTOR = Path("/workspace/vectors/Qwen3.6-27B/grader_parity_cheat_vs_clean.safetensors")  # ortho data/vectors/Qwen3.6-27B, uploaded 2026-10-09; the json sidecar is next to it
 
 #%% model + oracle lens. No Bridge: nothing is cached here, the lens only generates. Skip this cell in a kernel where olens.py's model cell already ran (it defines the same peft, tokenizer and olens_contract)

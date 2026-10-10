@@ -1,5 +1,7 @@
 #!./.venv/bin/python
 #%%
+from pathlib import Path
+from safetensors import safe_open
 from mechtools import *
 from mechtools.colors import *
 
@@ -61,5 +63,22 @@ if run_dating:
     ctx_around = 8
     targ_positions = list(range(targ_pos - ctx_around//2, targ_pos + ctx_around//2))
     dating_nla = nla_show(dating_cache, targ_positions, dating_toks, ctx=4096)
+
+#%% a saved direction from the ortho project (its data/vectors/Qwen3.6-27B, uploaded to the box): row 42 of the [n_layers, d_model] vector is resid_post 42, the one layer the NLA reads, so it goes in as is. The injection is norm-matched, so only the row's direction matters, not its norm (0.04). Both signs: the rows are cheat minus clean means, so -v is clean minus cheat
+
+run_vector = True
+if run_vector:
+    VECTOR = Path("/workspace/vectors/Qwen3.6-27B/grader_parity_cheat_vs_clean.safetensors")  # the json sidecar is next to it
+    with safe_open(VECTOR, "pt") as f:
+        v = f.get_tensor("v")  # [64, 5120] float32
+    n = 4
+    signs = {"cheat - clean": 1.0, "clean - cheat": -1.0}
+    peft.base_model.enable_adapter_layers()
+    vec_nla = dict(zip(signs, nla_read(peft, tokenizer, t.stack([s * v[nla_meta["layer"]] for s in signs.values()]).to(device), nla_meta, n=n)))  # one batch of 2 x n rows, sign-major; {label: [explanation per sample]}
+    peft.base_model.disable_adapter_layers()
+    for label, samples in vec_nla.items():
+        print(f"{purple}L{nla_meta['layer']}{endc} {cyan}{label}{endc}")
+        for s in samples: print(f"    {gray}-{endc} {s}")
+    show_table(["sign"] + [f"sample {j}" for j in range(1, n + 1)], [(label, *samples) for label, samples in vec_nla.items()], title=f"NLA on {VECTOR.stem}")
 
 #%%

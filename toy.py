@@ -68,7 +68,7 @@ run_dating = True
 if run_dating:
     reasoning_enabled = True
     positive_behavior = True
-    strip_resp = True
+    strip_resp = False
 
     dating_records = [json.loads(l) for l in open("rollouts/v_q27_dating_eq1.jsonl")]  # weirdchat results/qwen3.6-27b/v_q27_dating_eq1/records.jsonl
     dating_record = next(r for r in dating_records if (r["judge_match"] == positive_behavior) and (r["reasoning_enabled"] == reasoning_enabled))
@@ -205,5 +205,40 @@ if score_dating_jlens:
         labels=vocab_labels,
         ctx=4096,
     )
+
+#%% top-token sensitivity to ablating j-lens clusters at one position: project the clusters' token directions out of h_l[p] (the span of all their lens vectors, or just their mean direction), rerun, and color every token by how much its clean top next-token prediction changed
+
+ablate_layer = 49
+ablate_pos = 47
+ablate_clusters = [688, 82, 549, 960]  # cluster ids from the L49 p47 readout: pretend / simulated / mock
+ablate_span = True  # project out the span of the clusters' token directions; False projects out only their mean direction
+
+def cluster_subspace(clusters: list[int], layer: int, span: bool, model, jlens: dict, labels: Tensor) -> Tensor:
+    """[d_model, r] orthonormal columns: the span of the j-lens directions at `layer` of every token in the clusters (get_jlens_token_vec, batched), or r=1 for their mean direction."""
+    W = model.W_U
+    toks = t.isin(labels, t.tensor(clusters, device=labels.device)).nonzero().flatten().to(W.device)
+    dirs = (jlens["J"][layer].to(W.device, W.dtype).T @ W[:, toks]).T  # [n, d_model]
+    return orthonormal_basis(dirs if span else dirs.float().mean(0))
+
+def top_token_shift(toks: Tensor, layer: int, p: int, Q: Tensor, model) -> tuple[Tensor, Tensor, Tensor]:
+    """Rerun with the columns of Q projected out of blocks.{layer}.hook_resid_pre at position p. Returns, per position, the change in probability of the clean run's top next token, the clean top tokens, and the ablated run's top tokens. Positions before p cannot change."""
+    def hook(act, hook):
+        h, Qd = act[0, p].float(), Q.to(act.device)
+        act[0, p] = (h - Qd @ (Qd.T @ h)).to(act.dtype)
+        return act
+    clean = model(toks)[0].float().softmax(-1)
+    abl = model.run_with_hooks(toks, fwd_hooks=[(f"blocks.{layer}.hook_resid_pre", hook)])[0].float().softmax(-1)
+    top = clean.argmax(-1)
+    idx = t.arange(len(top), device=top.device)
+    return abl[idx, top] - clean[idx, top], top, abl.argmax(-1)
+
+show_ablation = True
+if show_ablation:
+    Q = cluster_subspace(ablate_clusters, ablate_layer, ablate_span, model, jlens, vocab_labels)
+    dp, top, abl_top = top_token_shift(dating_toks, ablate_layer, ablate_pos, Q, model)
+    show_toks(dating_toks, tokenizer, pos=ablate_pos, vals=dp, val_name="Δp(clean top)", title=f"L{ablate_layer} p{ablate_pos}: {'span' if ablate_span else 'mean'} of clusters {ablate_clusters} projected out, rank {Q.shape[1]}. Blue: the clean top token lost probability")
+    flipped = (abl_top != top).nonzero().flatten().tolist()
+    ids, top, abl_top = dating_toks[0].tolist(), top.tolist(), abl_top.tolist()
+    show_table(["pos", "token", "clean top", "ablated top", "Δp(clean top)"], [(q, repr(tokenizer.decode(ids[q])), repr(tokenizer.decode(top[q])), repr(tokenizer.decode(abl_top[q])), f"{dp[q].item():+.3f}") for q in flipped], title=f"{len(flipped)} positions where the top token flipped")
 
 #%%
