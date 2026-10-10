@@ -101,7 +101,7 @@ if show_dating_jlens:
 
 #%% j-lens cluster readout scored against this rollout. Beside each readout token's lens prob at position p: future = its logit under the mean final residual over positions p onward, decoded like a lens output (mostly a token-frequency prior, since final residuals are dominated by what they share); said = log10 of the max over positions p' > p of the model's actual next-token prob for it, i.e. did the model come close to saying it later; push = its logit when the change in the later final residuals from mean-ablating h_l[p] is decoded like a lens output, i.e. what the content at (l, p) actually pushes the rest of the rollout to say, the in-context version of what the lens linearizes and averages over a corpus. Each chip shows the score's percentile among all the tokens shown in the pane, hover for the raw value. Inlined from mechtools.lens so it can be changed here
 
-SKIP_FIRST = 16  # positions left out of the ablation baseline, attention sinks
+SKIP_ENDS = 4  # positions left out of each end of the sequence for the ablation baseline
 
 def future_logits(h_final: Tensor, p: int, model) -> Tensor:
     """[vocab] logits: the final residual (last block's output, before ln_final) averaged over positions p onward, decoded like a lens output."""
@@ -114,9 +114,9 @@ def said_scores(logits: Tensor, pos: list[int]) -> dict[int, Tensor]:
     return {p: probs[p + 1:].amax(0).log10() for p in pos}
 
 def push_scores(toks: Tensor, layer: int, pos: list[int], model, cache) -> dict[int, Tensor]:
-    """{p: [vocab] logits} from one batched forward: row 0 clean, row i+1 with blocks.{layer}.hook_resid_pre at pos[i] replaced by its mean over positions SKIP_FIRST onward. The change in the final residual, summed over positions p' > p, decoded like a lens output. The clean row is in the same batch so the two runs share numerics."""
+    """{p: [vocab] logits} from one batched forward: row 0 clean, row i+1 with blocks.{layer}.hook_resid_pre at pos[i] replaced by its mean over the positions SKIP_ENDS in from each end. The change in the final residual, summed over positions p' > p, decoded like a lens output. The clean row is in the same batch so the two runs share numerics."""
     hook_name = f"blocks.{layer}.hook_resid_pre"
-    baseline = cache[hook_name][0, SKIP_FIRST:].float().mean(0).to(cache[hook_name].dtype)
+    baseline = cache[hook_name][0, SKIP_ENDS:-SKIP_ENDS].float().mean(0).to(cache[hook_name].dtype)
     def ablate(act, hook):
         for i, p in enumerate(pos):
             act[i + 1, p] = baseline
@@ -134,7 +134,7 @@ def heat_cell(pct: float, raw: float) -> str:
     return f"<span title='{fmt3(raw)}' style='background:{px.colors.sample_colorscale('Viridis', [x])[0]};color:{'#000' if x >= 0.5 else '#eee'};padding:0 4px;border-radius:3px'>{pct:.0f}</span>"
 
 def scored_cluster_tables(lens_logits: Tensor, scores: dict[str, Tensor], labels: Tensor, name, n_clusters: int, n_rows: int, refs: tuple = ("future", "push")) -> list:
-    """mechtools cluster_tables with a chip per score. First the top-k of each score in refs (for reference), then the lens top-k overall with each token's cluster, then one table per top cluster (by lens prob mass) with each token's overall lens rank. Rows show lens prob then each score as its percentile among all the tokens shown in any of the tables (hover for the raw value); a cluster's header shows the mean percentile of its rows (hover for the raw sum)."""
+    """mechtools cluster_tables with a chip per score. First the top-k of each score in refs (for reference), then the lens top-k overall with each token's cluster, then one table per top cluster (by lens prob mass) with each token's overall lens rank. Rows show lens prob then each score as its percentile among all the tokens shown in any of the tables (hover for the raw value); a cluster's header shows the lens-prob-weighted mean percentile of its rows (hover for the weighted mean of the raw values)."""
     probs = lens_logits.flatten().float().softmax(-1)
     scores = {k: v.flatten().float().to(probs.device) for k, v in scores.items()}
     labels = labels.to(probs.device).flatten()
@@ -161,8 +161,9 @@ def scored_cluster_tables(lens_logits: Tensor, scores: dict[str, Tensor], labels
         return [([html.escape(repr(name(i))), mid(r, c), fmt3(p), *[heat_cell(*x) for x in xs]], cluster_color(c)) for i, r, c, p, *xs in zip(ids.tolist(), rank[ids].tolist(), labels[ids].tolist(), probs[ids].tolist(), *chips)]
     by_cluster, by_rank = lambda r, c: f"c{c}", lambda r, c: f"<span style='color:#999'>#{r}</span>"
     tables = [(f"{r} top-k &middot; lens prob &middot; {' &middot; '.join(scores)} %ile", table(ids, by_cluster)) for r, ids in ref_top.items()] + [("lens top-k overall", table(lens_top, by_cluster))]
+    wmean = lambda v, ids: ((v[ids] * probs[ids]).sum() / probs[ids].sum()).item()  # mean over the rows weighted by their lens probs
     for m, c in zip(top_mass.values.tolist(), top_mass.indices.tolist()):
-        chips = " &middot; ".join(f"{k} {heat_cell(pcts[k][sel[c]].mean().item(), scores[k][sel[c]].sum().item())}" for k in scores)
+        chips = " &middot; ".join(f"{k} {heat_cell(wmean(pcts[k], sel[c]), wmean(scores[k], sel[c]))}" for k in scores)
         tables.append((f"<span style='color:{cluster_color(c)}'>c{c}</span> &middot; mass {m:.3f} &middot; {chips} &middot; n={len(members[c])}", table(sel[c], by_rank)))
     return tables
 
