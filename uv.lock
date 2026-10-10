@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -1269,7 +1269,7 @@ wheels = [
 [[package]]
 name = "mechtools"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/ekhadley/mechtools#dbc450e5a95ab01bf3f2c50edcba7204b042b768" }
+source = { git = "ssh://git@github.com/ekhadley/mechtools#580a280deefed3d491fde6b55e3c41e1e5440d61" }
 dependencies = [
     { name = "httpx" },
     { name = "huggingface-hub" },
@@ -1278,6 +1278,7 @@ dependencies = [
     { name = "peft" },
     { name = "plotly" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "safetensors" },
     { name = "scipy" },
     { name = "tabulate" },
