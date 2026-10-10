@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -1269,7 +1269,7 @@ wheels = [
 [[package]]
 name = "mechtools"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/ekhadley/mechtools#580a280deefed3d491fde6b55e3c41e1e5440d61" }
+source = { git = "ssh://git@github.com/ekhadley/mechtools#277f1c09ecb31e61fb1dc39acadc8305c55dd437" }
 dependencies = [
     { name = "httpx" },
     { name = "huggingface-hub" },
