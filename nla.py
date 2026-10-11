@@ -10,12 +10,13 @@ from mechtools.colors import *
 t.set_grad_enabled(False)
 set_seed(42)
 
-#%% model + NLA. The verbalizer is two LoRAs on the model's own weights (the warm-start LoRA, 3.7 GB, and the RL LoRA on top of it), loaded before the Bridge boots (peft cannot inject into the Bridge's wrappers) and disabled by default, so sampling and caching below are the plain model's; nla_show enables them around a read
+#%% model + NLA. The verbalizer is two LoRAs on the model's own weights (the warm-start LoRA, 3.7 GB, and the RL LoRA on top of it), loaded before the Bridge boots (peft cannot inject into the Bridge's wrappers) and disabled by default, so sampling and caching below are the plain model's; nla_show enables them around a read. The oracle lens is a third LoRA on the same weights, for show_err_olens
 
 MODEL_ID = "Qwen/Qwen3.6-27B"
 device = t.device("cuda")
 hf = load_hf_model(MODEL_ID, device_map="auto")
 peft, nla_meta = load_nla(hf)  # ceselder/qwen3.6-27b-nla-rl at RL step 600, the default and the step of the one saved reconstructor: reads layer 42 only, the output of block 42
+peft, olens_contract = load_olens(peft)  # agu18dec/olens_and_ar:olens_s3d_rl600, reads layers 20..60 step 4 (block L's output)
 peft.base_model.set_adapter(nla_meta["adapters"])  # both adapters active together; loading alone leaves only the warm-start one active, which is neither the base nor the verbalizer
 peft.base_model.disable_adapter_layers()
 model = boot_bridge(hf)
@@ -110,9 +111,11 @@ if show_nla_sorted:
 
 run_err = True
 if run_err:
-    err_pos = 47  # ' this' in the user's turn ('looking for on this app'), where the j-lens at L49 reads pretend / simulated / mock
+    err_pos = 116  # '\n\n' after '</think>', the last template token: the next token is the response's first, 'Hey'
+    # err_pos = 47  # ' this' in the user's turn ('looking for on this app'), where the j-lens at L49 reads pretend / simulated / mock
     # err_pos = 121  # ' appreciate', the 5th token of the response ('Hey! I really appreciate that')
-    ctrl_pos = [121, 230]  # ' appreciate' early in the response and ' human' later in it ('I promise I am 100% human')
+    ctrl_pos = [47, 121]  # ' this' in the user's turn and ' appreciate' early in the response
+    # ctrl_pos = [121, 230]  # ' appreciate' early in the response and ' human' later in it ('I promise I am 100% human')
     # ctrl_pos = [47, 230]  # ' this' in the user's turn and ' human' later in the response
     n_err = 128  # samples at err_pos, a multiple of 64: generated 64 rows at a time, each batch with its own seed
     n_ctrl = 32  # samples at each control position, generated together
@@ -264,5 +267,27 @@ if run_err_sweep:
     show_table(["condition"] + list(themes), [(c, *[sum(re.search(p, s["explanation"], flags=re.I) is not None for s in rs) for p in themes.values()]) for c, rs in sweep_recs.items()], title=f"explanations (of {n_sweep}) mentioning each theme")
     for j in range(2):
         show_table(["condition", "mse vs a", "explanation"], [(c, 2 - 2 * (recons[c][j] @ a_unit), rs[j]["explanation"]) for c, rs in sweep_recs.items()], title=f"sample {j + 1} in every condition, from the same random draws")
+
+#%% oracle lens at err_pos, at five of its layers around the NLA's 42 (the j-lens's L49 is block 48's output). The cache comes from the plain model; the lens adapter is active for the read only, then the NLA's adapters are set back, disabled
+
+show_err_olens = True
+if show_err_olens:
+    ol_layers = [36, 40, 44, 48, 52]
+    n_ol = 8
+    _, ol_cache = model.run_with_cache(dating_toks, names_filter=lambda n: n in {f"blocks.{L}.hook_resid_post" for L in ol_layers})
+    peft.base_model.set_adapter("olens")
+    peft.base_model.enable_adapter_layers()
+    ol_recs = olens_readout(ol_cache, ol_layers, err_pos, peft, tokenizer, olens_contract, n=n_ol, input_src=dating_toks, title=f"oracle lens at p{err_pos} {tokenizer.decode(dating_toks[0, err_pos].item())!r}, {n_ol} samples per layer")
+    peft.base_model.set_adapter(nla_meta["adapters"])
+    peft.base_model.disable_adapter_layers()
+
+#%% j-lens cluster readout of the activation at err_pos over depth (block L's input), and the model's own next-token prediction there
+
+show_jlens_layers = True
+if show_jlens_layers:
+    jl_layers = [20, 30, 36, 43, 49, 55, 60]
+    jl_logits, jl_cache = model.run_with_cache(dating_toks, names_filter=lambda n: n in {f"blocks.{L}.hook_resid_pre" for L in jl_layers})
+    show_logits(dating_toks, logits=jl_logits, tokenizer=tokenizer, pos=[err_pos], title=f"the model's next-token prediction at p{err_pos}")
+    jl_scores, _ = jlens_cluster_readout(jl_cache, jl_layers, err_pos, model, jlens, vocab_labels, input_src=dating_toks, title=f"j-lens at p{err_pos} {tokenizer.decode(dating_toks[0, err_pos].item())!r} over depth")
 
 #%%
