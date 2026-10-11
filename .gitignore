@@ -14,3 +14,6 @@ wheels/
 
 # VS Code interactive window autosaves
 Interactive-*.ipynb
+
+# Experiment outputs (saved tensors, exported notebooks)
+results/

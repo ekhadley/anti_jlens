@@ -18,8 +18,8 @@ tokenizer = model.tokenizer
 
 olens_layers = [28, 36, 44, 52, 60]  # each layer is one batched generation over all positions read, so fewer layers is faster
 
-def olens_show(cache: dict, pos: list[int], toks: Tensor, n: int = 2, **kw) -> dict:
-    """olens_readout of a hook_resid_post cache at `pos`, the lens enabled for the read only: a tab per layer and per position, n samples each; {layer: {pos: [bullets per sample]}}. kw goes to olens_readout (ctx, do_sample=False for greedy, ...)."""
+def olens_show(cache: dict, pos: list[int], toks: Tensor, n: int = 2, **kw) -> list[dict]:
+    """olens_readout of a hook_resid_post cache at `pos`, the lens enabled for the read only: a tab per layer and per position, n samples each; its records (layer, pos, i, j, h, text, ids, stopped, bullets). kw goes to olens_readout (ctx, do_sample=False for greedy, ...)."""
     peft.base_model.enable_adapter_layers()
     out = olens_readout(cache, olens_layers, pos, peft, tokenizer, olens_contract, n=n, input_src=toks, **kw)
     peft.base_model.disable_adapter_layers()

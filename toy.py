@@ -133,6 +133,11 @@ def heat_cell(pct: float, raw: float) -> str:
     x = min(max(pct / 100, 0.0), 1.0)  # plotly raises outside [0, 1]
     return f"<span title='{fmt3(raw)}' style='background:{px.colors.sample_colorscale('Viridis', [x])[0]};color:{'#000' if x >= 0.5 else '#eee'};padding:0 4px;border-radius:3px'>{pct:.0f}</span>"
 
+def html_grid(tables: list[tuple[str, list[tuple[list[str], str]]]]) -> str:
+    """A grid of tables whose headers and cells are html (the score chips), which mechtools' readout_grid escapes: (header html, [(cell htmls, row color)]) per table, in the frame's 'rg' grid so the readout css styles it like mechtools' own tables. tabbed takes the result as a raw html pane."""
+    row = lambda cells, color: f"<tr style='color:{color}'>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>"
+    return "<div class='rg'>" + "".join(f"<table><tr><th colspan={len(rows[0][0]) if rows else 1}>{header}</th></tr>" + "".join(row(*r) for r in rows) + "</table>" for header, rows in tables) + "</div>"
+
 def scored_cluster_tables(lens_logits: Tensor, scores: dict[str, Tensor], labels: Tensor, name, n_clusters: int, n_rows: int, refs: tuple = ("future", "push")) -> list:
     """mechtools cluster_tables with a chip per score. First the top-k of each score in refs (for reference), then the lens top-k overall with each token's cluster, then one table per top cluster (by lens prob mass) with each token's overall lens rank. Rows show lens prob then each score as its percentile among all the tokens shown in any of the tables (hover for the raw value); a cluster's header shows the lens-prob-weighted mean percentile of its rows (hover for the weighted mean of the raw values)."""
     probs = lens_logits.flatten().float().softmax(-1)
@@ -179,7 +184,7 @@ def scored_jlens_cluster_readout(cache, toks: Tensor, logits: Tensor, h_final: T
             lens = get_lens_logits(cache[f"blocks.{layer}.hook_resid_pre"][0, p], layer, model, jlens)
             overlap = len(set(lens.flatten().topk(50).indices.tolist()) & set(push[p].flatten().topk(50).indices.tolist()))
             tables = scored_cluster_tables(lens, {"future": future[p], "said": said[p], "push": push[p]}, labels, model.tokenizer.decode, n_clusters, n_rows)
-            panes[f"L{layer}"][f"p{p}"] = f"<div style='color:#999;margin:0 0 6px'>lens top-50 in push top-50: {overlap}</div>" + readout_grid(tables)
+            panes[f"L{layer}"][f"p{p}"] = f"<div style='color:#999;margin:0 0 6px'>lens top-50 in push top-50: {overlap}</div>" + html_grid(tables)
     strs, ids = get_toks(toks, model.tokenizer)
     display(HTML(readout_html(tabbed(panes, token_strip(strs, ids, pos, ctx)), title, n_cols=n_cols)))
 

@@ -30,8 +30,9 @@ signs = {"cheat - clean": 1.0, "clean - cheat": -1.0}
 peft.base_model.enable_adapter_layers()  # a no-op right after load_olens; needed in olens.py's kernel, where the lens is disabled between reads
 olens_vec = {}
 for L in olens_contract["layers"]:
-    rows = olens_read(peft, tokenizer, t.stack([s * v[L] for s in signs.values()]).to(device), L, olens_contract, n=n)  # [2, n] lists of bullets, sign-major
-    for label, items in zip(signs, rows):
+    recs = olens_read(peft, tokenizer, t.stack([s * v[L] for s in signs.values()]).to(device), L, olens_contract, n=n)  # 2 x n records, sign-major: a record's i is its sign, j its sample
+    for i, label in enumerate(signs):
+        items = [r["bullets"] for r in recs if r["i"] == i]
         olens_vec[(label, L)] = items
         print(f"{purple}L{L}{endc} {cyan}{label}{endc}")
         for bullets in items: print(f"    {gray}-{endc} " + f" {gray}|{endc} ".join(bullets))
